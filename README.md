@@ -1,8 +1,20 @@
-LumenIndex — Rural Development Index for Latin America
-Built for Living Stones Foundation | Applied Data & Digital Innovation Lab
+## Data Sources
 
-An open-source data analysis platform that estimates economic development 
-levels across rural Latin American municipalities using satellite-derived 
-nighttime light intensity, population density, and infrastructure indicators.
+All data for this dashboard is sourced from publicly available open datasets.
 
-Tech stack: Python · SQL · Streamlit · LangChain · World Bank WDI · NASA VIIRS · WorldPop
+| Dataset | Source | Coverage |
+|---|---|---|
+| World Development Indicators (WDI) | [World Bank](https://data.worldbank.org/country/chile) | Chile · 2000–2023 |
+
+## Current Phase
+
+The current dashboard uses World Bank WDI data for Chile (2000–2023) as a 
+pilot. Subsequent phases will integrate NASA VIIRS nighttime light intensity 
+and WorldPop population density to build a composite rural development index 
+across Latin American municipalities.
+
+## Key Indicators Analyzed
+
+GDP per capita, unemployment rate, internet penetration, mobile subscriptions, 
+rural electricity access, rural water and sanitation access, life expectancy, 
+urban vs rural population split, poverty headcount.
