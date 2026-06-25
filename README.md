@@ -5,6 +5,9 @@ All data for this dashboard is sourced from publicly available open datasets.
 | Dataset | Source | Coverage |
 |---|---|---|
 | World Development Indicators (WDI) | [World Bank](https://data.worldbank.org/country/chile) | Chile · 2000–2023 |
+| VIIRS Nighttime Lights | [NASA EarthData](https://earthdata.nasa.gov/topics/human-dimensions/nighttime-lights) | LATAM · Annual |
+| Population Grids | [WorldPop](https://www.worldpop.org/geodata/listing?id=75) | LATAM · Annual |
+| Administrative Boundaries | [GADM](https://gadm.org/download_country.html) | Country / Municipality level |
 
 ## Current Phase
 
