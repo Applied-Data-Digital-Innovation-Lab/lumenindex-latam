@@ -86,7 +86,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── CONNECTION ────────────────────────────────────────────────────────────────
-CONNECTION_STRING = "postgresql://neondb_owner:npg_IOD3kvf5PKSZ@ep-curly-fire-ata7105s.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require"
+CONNECTION_STRING = st.secrets["DATABASE_URL"]
 
 @st.cache_data(ttl=300)
 def load_data():
