@@ -197,10 +197,8 @@ lumenindex-latam/
 
 ## 👩‍💻 Built By
 
-**Deepeka Gurunathan** — AI/ML Engineer Volunteer
+**Deepeka Gurunathan** — AI/ML Engineer
 Living Stones Foundation · Applied Data & Digital Innovation Lab (LATAM)
-Supervisors: Tiara Rojas · Federico Siso · Carlos Cuauhtemoc
-
 ---
 
 *Source: World Bank WDI · IFPRI ASTI · ILO Female Labor Force · Neon PostgreSQL · 2026*
