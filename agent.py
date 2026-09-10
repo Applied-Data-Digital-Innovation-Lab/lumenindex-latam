@@ -172,23 +172,26 @@ def query_agent(user_question: str, conversation_history: list) -> tuple:
         {"role": "user", "content": user_question}
     ]
 
-    # First call — get SQL from GPT-4o
-    response_text = call_lsf_gateway(messages)
-    sql_query = extract_sql(response_text)
-    df_result = None
+# First call — get SQL silently
+first_response = call_lsf_gateway(messages)
+sql_query = extract_sql(first_response)
+df_result = None
+response_text = ""
 
-    if sql_query:
-        df_result = execute_query(sql_query)
-        if not df_result.empty and 'Error' not in df_result.columns:
-            data_str = df_result.to_string(index=False)
-            # Second call — interpret results in plain English only
-            interpretation_messages = messages + [
-                {"role": "assistant", "content": response_text},
-                {"role": "user", "content": f"The query returned this data:\n\n{data_str}\n\nPlease provide a clear, insightful interpretation in plain English. Do not show any SQL. Just give a warm, informative answer about what this means for LATAM rural development."}
-            ]
-            response_text = call_lsf_gateway(interpretation_messages)
+if sql_query:
+    df_result = execute_query(sql_query)
+    if not df_result.empty and 'Error' not in df_result.columns:
+        data_str = df_result.to_string(index=False)
+        interpretation_messages = messages + [
+            {"role": "user", "content": f"Based on this data about LATAM development:\n\n{data_str}\n\nAnswer this question in plain English with insights: {user_question}\n\nDo not mention SQL, tables, or queries. Just give a clear, warm, insightful answer."}
+        ]
+        response_text = call_lsf_gateway(interpretation_messages)
+    else:
+        response_text = "I couldn't find data to answer that question. Could you try rephrasing it?"
+else:
+    response_text = first_response
 
-    return response_text, df_result
+return response_text, df_result
 
 # ── STREAMLIT UI ──────────────────────────────────────────────────────────────
 
