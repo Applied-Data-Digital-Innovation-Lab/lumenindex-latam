@@ -24,7 +24,6 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .stChatMessage { background-color: #FFFFFF; border-radius: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,93 +43,90 @@ MODEL = "gpt-4o"
 
 # ── DATABASE SCHEMA CONTEXT ───────────────────────────────────────────────────
 DB_SCHEMA = """
-You have access to a PostgreSQL database called lumenindex with the following tables:
+You have access to a PostgreSQL database with the following tables:
 
-1. lumenindex_combined (main table — use this most often)
-   - country VARCHAR: LATAM country name (17 countries)
-   - year INTEGER: year from 1990 to 2020
+1. lumenindex_combined (main table)
+   - country VARCHAR: 17 LATAM countries
+   - year INTEGER: 1990 to 2020
    - female_lfp_rate NUMERIC: female labor force participation rate (%)
    - agri_research_spending NUMERIC: agricultural research spending
    - fte_researchers NUMERIC: full time equivalent researchers
    - fte_researchers_phd_pct NUMERIC: % of researchers with PhD
    - gdp_per_capita NUMERIC: GDP per capita in USD
    - unemployment_rate NUMERIC: unemployment rate (%)
-   - electricity_access NUMERIC: electricity access (% of population)
-   - internet_access NUMERIC: internet access (% of population)
+   - electricity_access NUMERIC: electricity access (%)
+   - internet_access NUMERIC: internet access (%)
    - life_expectancy NUMERIC: life expectancy at birth (years)
    - poverty_headcount NUMERIC: poverty headcount ratio (%)
-   - rural_pop_pct NUMERIC: rural population (% of total)
+   - rural_pop_pct NUMERIC: rural population (%)
 
 2. female_labor_force_latam
-   - country VARCHAR
-   - year INTEGER (1990-2025)
-   - lfp_rate NUMERIC: female labor force participation rate (%)
+   - country, year, lfp_rate
 
 3. chile_development_indicators
-   - country VARCHAR (Chile only)
-   - indicator_name VARCHAR
-   - indicator_code VARCHAR
-   - year INTEGER (2000-2023)
-   - value NUMERIC
+   - country (Chile only), indicator_name, indicator_code, year, value
 
 4. asti_agricultural_research
-   - country VARCHAR
-   - year INTEGER
-   - indicator VARCHAR
-   - value NUMERIC
+   - country, year, indicator, value
 
 5. latam_poverty
-   - country VARCHAR
-   - year INTEGER
-   - poverty_headcount NUMERIC
+   - country, year, poverty_headcount
 
-The 17 LATAM countries are: Argentina, Bolivia, Brazil, Chile, Colombia,
-Costa Rica, Dominican Republic, Ecuador, El Salvador, Guatemala, Honduras,
+Countries: Argentina, Bolivia, Brazil, Chile, Colombia, Costa Rica,
+Dominican Republic, Ecuador, El Salvador, Guatemala, Honduras,
 Mexico, Nicaragua, Panama, Paraguay, Peru, Uruguay.
 
-Chile is the only High development tier country with a LumenIndex score of 73.9.
-All other countries are Medium tier with scores between 38-51.
+Chile is the only High tier country (LumenIndex score 73.9).
+All others are Medium tier (scores 38-51).
 """
 
-SYSTEM_PROMPT = f"""You are the LumenIndex AI Agent, an expert data analyst for Living Stones Foundation's
-rural development index project covering Latin American countries.
+SQL_SYSTEM_PROMPT = f"""You are a PostgreSQL expert. Given a question about LATAM development data, 
+write ONLY a valid PostgreSQL SQL query. Return ONLY the SQL query, nothing else — no explanation, 
+no markdown, no code blocks, just raw SQL.
 
-You have access to a PostgreSQL database with development indicators for 17 LATAM countries from 1990 to 2020.
-
+Database schema:
 {DB_SCHEMA}
 
-Your job is to:
-1. Understand the user's question about LATAM development data
-2. Write a PostgreSQL SQL query to answer it
-3. Execute the query and interpret the results
-4. Provide a clear, insightful answer with context
+Rules:
+- Use lumenindex_combined as primary table
+- Filter NULL values with IS NOT NULL
+- Round numbers with ROUND(value::numeric, 2)
+- Always ORDER BY results
+- LIMIT 20 rows maximum
+- Return ONLY the SQL query, no other text"""
 
-When writing SQL:
-- Always use the lumenindex_combined table as the primary source
-- Handle NULL values with IS NOT NULL filters where appropriate
-- Round numeric results to 2 decimal places using ROUND(value::numeric, 2)
-- Always ORDER BY results for readability
-- Limit results to 20 rows maximum
+INSIGHT_SYSTEM_PROMPT = """You are the LumenIndex AI Agent for Living Stones Foundation.
+You help non-technical stakeholders understand rural development data for Latin America.
 
-Important: Do NOT show the SQL query in your response. Just provide:
-1. A clear, direct answer in plain English
-2. Key insight or finding
-3. Any relevant context about what this means for rural development in Latin America
+Your responses should be:
+- Clear and in plain English
+- Warm and insightful
+- Connected to rural development and social impact
+- Free of any technical jargon, SQL, or database references
 
-Be conversational, warm, and insightful. Always connect findings to 
-Living Stones Foundation's mission of empowering communities in Latin America."""
+Never mention SQL, queries, tables, or databases. Just answer the question directly."""
 
-# ── LSF GATEWAY FUNCTION ──────────────────────────────────────────────────────
-def call_lsf_gateway(messages: list) -> str:
+# ── HELPER FUNCTIONS ──────────────────────────────────────────────────────────
+def clean_response(text: str) -> str:
+    """Remove any SQL or code blocks from response text"""
+    text = re.sub(r'```sql.*?```', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'```SQL.*?```', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    text = re.sub(r'SELECT\s+.*?;', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+def call_lsf(messages: list, system: str) -> str:
+    """Call LSF AI Gateway"""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LSF_TOKEN}"
     }
     data = {
         "model": MODEL,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        "messages": [{"role": "system", "content": system}] + messages,
         "max_tokens": 2000,
-        "temperature": 0.3
+        "temperature": 0.1
     }
     response = requests.post(LSF_BASE_URL, headers=headers, json=data, timeout=30)
     response.raise_for_status()
@@ -151,47 +147,56 @@ def execute_query(sql: str) -> pd.DataFrame:
     except Exception as e:
         return pd.DataFrame({'Error': [str(e)]})
 
-def extract_sql(response_text: str) -> str:
-    patterns = [
-        r'```sql\n(.*?)\n```',
-        r'```SQL\n(.*?)\n```',
-        r'```\n(SELECT.*?)\n```',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    select_match = re.search(r'(SELECT\s+.*?;)', response_text, re.DOTALL | re.IGNORECASE)
-    if select_match:
-        return select_match.group(1).strip()
-    return None
-
 # ── MAIN AGENT FUNCTION ───────────────────────────────────────────────────────
 def query_agent(user_question: str, conversation_history: list) -> tuple:
-    messages = conversation_history + [
-        {"role": "user", "content": user_question}
-    ]
+    """
+    Step 1: Get SQL from GPT-4o (SQL-only call)
+    Step 2: Execute SQL against Neon
+    Step 3: Get plain English interpretation (no SQL)
+    """
 
-# First call — get SQL silently
-first_response = call_lsf_gateway(messages)
-sql_query = extract_sql(first_response)
-df_result = None
-response_text = ""
+    # Step 1: Get SQL only
+    sql_messages = [{"role": "user", "content": f"Write a SQL query to answer: {user_question}"}]
+    sql_response = call_lsf(sql_messages, SQL_SYSTEM_PROMPT)
 
-if sql_query:
-    df_result = execute_query(sql_query)
-    if not df_result.empty and 'Error' not in df_result.columns:
-        data_str = df_result.to_string(index=False)
-        interpretation_messages = messages + [
-            {"role": "user", "content": f"Based on this data about LATAM development:\n\n{data_str}\n\nAnswer this question in plain English with insights: {user_question}\n\nDo not mention SQL, tables, or queries. Just give a clear, warm, insightful answer."}
-        ]
-        response_text = call_lsf_gateway(interpretation_messages)
+    # Clean up SQL response
+    sql_query = sql_response.strip()
+    sql_query = re.sub(r'```sql\s*', '', sql_query, flags=re.IGNORECASE)
+    sql_query = re.sub(r'```\s*', '', sql_query)
+    sql_query = sql_query.strip()
+
+    df_result = None
+    response_text = ""
+
+    # Step 2: Execute SQL
+    if sql_query.upper().startswith("SELECT"):
+        df_result = execute_query(sql_query)
+
+        if not df_result.empty and 'Error' not in df_result.columns:
+            data_str = df_result.to_string(index=False)
+
+            # Step 3: Get plain English interpretation
+            insight_messages = conversation_history + [
+                {"role": "user", "content": f"""Question: {user_question}
+
+Data results:
+{data_str}
+
+Please answer the question in plain English with key insights about what this means for rural development in Latin America. Do not mention SQL, queries, or databases."""}
+            ]
+            response_text = call_lsf(insight_messages, INSIGHT_SYSTEM_PROMPT)
+            response_text = clean_response(response_text)
+        else:
+            response_text = "I couldn't find data to answer that question. Could you try rephrasing it?"
     else:
-        response_text = "I couldn't find data to answer that question. Could you try rephrasing it?"
-else:
-    response_text = first_response
+        # No SQL needed — general question
+        general_messages = conversation_history + [
+            {"role": "user", "content": user_question}
+        ]
+        response_text = call_lsf(general_messages, INSIGHT_SYSTEM_PROMPT)
+        response_text = clean_response(response_text)
 
-return response_text, df_result
+    return response_text, df_result
 
 # ── STREAMLIT UI ──────────────────────────────────────────────────────────────
 
@@ -265,35 +270,29 @@ if "example_q" in st.session_state:
     del st.session_state.example_q
 
 if question:
-    # Show user message
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
 
-    # Get agent response
     with st.chat_message("assistant"):
-        with st.spinner("🤖 Analyzing your question..."):
+        with st.spinner("Analyzing your question..."):
             try:
                 response_text, df_result = query_agent(
                     question,
                     st.session_state.conversation_history
                 )
 
-                # Display response text only
                 st.markdown(response_text)
 
-                # Display data table if available
                 if df_result is not None and not df_result.empty and 'Error' not in df_result.columns:
                     st.dataframe(df_result, use_container_width=True, hide_index=True)
 
-                # Save to history
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": response_text,
                     "dataframe": df_result,
                 })
 
-                # Update conversation history
                 st.session_state.conversation_history.append(
                     {"role": "user", "content": question}
                 )
@@ -301,7 +300,6 @@ if question:
                     {"role": "assistant", "content": response_text}
                 )
 
-                # Keep last 10 exchanges only
                 if len(st.session_state.conversation_history) > 20:
                     st.session_state.conversation_history = st.session_state.conversation_history[-20:]
 
