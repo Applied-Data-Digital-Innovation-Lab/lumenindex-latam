@@ -8,6 +8,8 @@ An open-source data analysis platform that estimates economic and social develop
 
 ## 🚀 Live Dashboard
 
+🤖 [AI Agent	lumenindexagent] (https://lumenindexagent-latam.streamlit.app/)
+
 👉 [View LumenIndex Dashboard](https://lumenindex-latam01.streamlit.app/)
 
 ![Dashboard Preview](lumenindex_dashboard.png)
@@ -179,20 +181,43 @@ lumenindex-latam/
 └── README.md
 ```
 
+AI Agent
+
+Live: lumenindexagent-latam.streamlit.app
+
+Powered by GPT-4o via Living Stones Foundation AI Gateway
+Connected to Neon PostgreSQL cloud database
+Ask questions in plain English — no SQL required
+Returns plain English answers + data table
+Remembers conversation context (last 10 exchanges)
+Example questions built in for quick demos
+
+How it works:
+
+User asks a question in plain English
+GPT-4o generates SQL internally (hidden)
+SQL runs against Neon PostgreSQL
+GPT-4o interprets results and responds in plain English
 ---
 
-## 📅 Project Roadmap
+# Clone repo
+git clone https://github.com/Applied-Data-Digital-Innovation-Lab/lumenindex-latam.git
+cd lumenindex-latam
 
-| Phase | Description | Status |
-|---|---|---|
-| Phase 1 | Onboarding & goal definition | ✅ Complete |
-| Phase 2 | Technical foundations & dataset exploration | ✅ Complete |
-| Phase 3 | Data cleanup, SQL storage & dashboards | ✅ Complete |
-| Phase 4 | ML modeling — Poverty Predictor & Tier Classifier | ✅ Complete |
-| Phase 5 | AI Agent — LangChain + GPT-4o natural language queries | 🔄 In Progress |
-| Phase 6 | Agricultural spending forecast + FAO dataset integration | ⏳ Upcoming |
-| Phase 7 | Final documentation & LSF presentation | ⏳ Upcoming |
+# Install dependencies
+pip install -r requirements.txt
 
+# Add secrets for local run
+mkdir .streamlit
+# Create .streamlit/secrets.toml with:
+# DATABASE_URL = "your-neon-connection-string"
+# LSF_TOKEN = "your-lsf-gateway-token"
+
+# Run dashboard
+python -m streamlit run app.py
+
+# Run AI agent
+python -m streamlit run agent.py
 ---
 
 ## 👩‍💻 Built By
