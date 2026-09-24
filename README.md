@@ -8,7 +8,7 @@ An open-source data analysis platform that estimates economic and social develop
 
 ## 🚀 Live Dashboard
 
-🤖 [AI Agent	lumenindexagent] (https://lumenindexagent-latam.streamlit.app/)
+🤖 Check out AI Agent	lumenindexagent here (https://lumenindexagent-latam.streamlit.app/)
 
 👉 [View LumenIndex Dashboard](https://lumenindex-latam01.streamlit.app/)
 
