@@ -9,15 +9,17 @@
 # pip install psycopg2-binary xgboost scikit-learn matplotlib seaborn pandas numpy
 
 # ── STEP 1: IMPORT LIBRARIES ─────────────────────────────────────────────────
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import GroupShuffleSplit, GroupKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 import xgboost as xgb
 import psycopg2
@@ -29,7 +31,9 @@ print("✓ All libraries imported successfully")
 # ── STEP 2: LOAD DATA FROM NEON ──────────────────────────────────────────────
 print("\nConnecting to Neon PostgreSQL...")
 
-CONNECTION_STRING = "postgresql://neondb_owner:npg_IOD3kvf5PKSZ@ep-curly-fire-ata7105s.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require"
+CONNECTION_STRING = os.getenv("DATABASE_URL")
+if not CONNECTION_STRING:
+    raise RuntimeError("DATABASE_URL is not set. Set it as an environment variable or Streamlit secret; never hard-code database passwords.")
 
 conn = psycopg2.connect(CONNECTION_STRING)
 
@@ -134,61 +138,66 @@ print(f"X shape: {X.shape}")
 print(f"y shape: {y.shape}")
 print(f"Target range: {y.min():.1f}% - {y.max():.1f}%")
 
-# ── STEP 5: HANDLE MISSING VALUES ────────────────────────────────────────────
-print("\n── STEP 5: HANDLING MISSING VALUES ──")
+# ── STEP 5: LEAKAGE-FREE TRAIN/TEST SPLIT ──────────────────────────────────
+print("\n── STEP 5: LEAKAGE-FREE TRAIN/TEST SPLIT ──")
 
-imputer = SimpleImputer(strategy='median')
-X_imputed = imputer.fit_transform(X)
-X_imputed = pd.DataFrame(X_imputed, columns=FEATURES_WITH_YEAR)
+# Evaluate on unseen time periods when possible (train <= 2015, test > 2015).
+# Fall back to a country-grouped split so the same country cannot leak across
+# train/test through neighbouring years.
+time_cutoff = 2015
+if "year" in df.columns and df["year"].min() <= time_cutoff < df["year"].max():
+    train_mask = df["year"] <= time_cutoff
+    test_mask = df["year"] > time_cutoff
+    split_name = f"time split (train <= {time_cutoff}, test > {time_cutoff})"
+else:
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    train_idx, test_idx = next(gss.split(X, y, groups=df["country"]))
+    train_mask = df.index.isin(train_idx)
+    test_mask = df.index.isin(test_idx)
+    split_name = "country-grouped split (GroupShuffleSplit)"
 
-print(f"Missing values before imputation: {X.isnull().sum().sum()}")
-print(f"Missing values after imputation: {X_imputed.isnull().sum().sum()}")
+X_train, X_test = X.loc[train_mask], X.loc[test_mask]
+y_train, y_test = y.loc[train_mask], y.loc[test_mask]
 
-# ── STEP 6: TRAIN-TEST SPLIT ──────────────────────────────────────────────────
-print("\n── STEP 6: TRAIN-TEST SPLIT ──")
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X_imputed, y,
-    test_size=0.2,
-    random_state=42
-)
-
+print(f"Split: {split_name}")
 print(f"Training set: {X_train.shape[0]} rows")
 print(f"Test set:     {X_test.shape[0]} rows")
+print(f"Train countries: {df.loc[train_mask, 'country'].nunique()} | Test countries: {df.loc[test_mask, 'country'].nunique()}")
 
-# ── STEP 7: TRAIN XGBOOST MODEL ──────────────────────────────────────────────
-print("\n── STEP 7: TRAINING XGBOOST MODEL ──")
+# ── STEP 6: TRAIN XGBOOST MODEL (IMPUTATION INSIDE PIPELINE) ─────────────────
+print("\n── STEP 6: TRAINING XGBOOST MODEL ──")
+print("Missing values are imputed inside the pipeline, so the imputer only learns from training data.")
 
-model = xgb.XGBRegressor(
-    n_estimators=200,
-    max_depth=4,
-    learning_rate=0.05,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=42,
-    verbosity=0
-)
+pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("model", xgb.XGBRegressor(
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        verbosity=0
+    )),
+])
 
-model.fit(
-    X_train, y_train,
-    eval_set=[(X_test, y_test)],
-    verbose=False
-)
+pipeline.fit(X_train, y_train)
+model = pipeline.named_steps["model"]
 
 print("✓ Model trained successfully")
 
-# ── STEP 8: EVALUATE MODEL ───────────────────────────────────────────────────
-print("\n── STEP 8: MODEL EVALUATION ──")
+# ── STEP 7: EVALUATE MODEL ───────────────────────────────────────────────────
+print("\n── STEP 7: MODEL EVALUATION ──")
 
-y_pred_train = model.predict(X_train)
-y_pred_test  = model.predict(X_test)
+y_pred_train = pipeline.predict(X_train)
+y_pred_test = pipeline.predict(X_test)
 
 # Metrics
 train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
-test_rmse  = np.sqrt(mean_squared_error(y_test,  y_pred_test))
-train_r2   = r2_score(y_train, y_pred_train)
-test_r2    = r2_score(y_test,  y_pred_test)
-test_mae   = mean_absolute_error(y_test, y_pred_test)
+test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+train_r2 = r2_score(y_train, y_pred_train)
+test_r2 = r2_score(y_test, y_pred_test)
+test_mae = mean_absolute_error(y_test, y_pred_test)
 
 print(f"\n  {'Metric':<25} {'Train':>10} {'Test':>10}")
 print(f"  {'-'*45}")
@@ -196,9 +205,17 @@ print(f"  {'RMSE':<25} {train_rmse:>10.2f} {test_rmse:>10.2f}")
 print(f"  {'R² Score':<25} {train_r2:>10.4f} {test_r2:>10.4f}")
 print(f"  {'MAE':<25} {'':>10} {test_mae:>10.2f}")
 
-# Cross-validation
-cv_scores = cross_val_score(model, X_imputed, y, cv=5, scoring='r2')
-print(f"\n  5-Fold Cross-Validation R²: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+# Grouped cross-validation: imputation happens inside each fold, and countries
+# do not leak across folds.
+groups = df["country"]
+n_groups = groups.nunique()
+if n_groups >= 2:
+    n_splits = min(5, n_groups)
+    cv = GroupKFold(n_splits=n_splits)
+    cv_scores = cross_val_score(pipeline, X, y, groups=groups, cv=cv, scoring="r2")
+    print(f"\n  Grouped {n_splits}-Fold Cross-Validation R²: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+else:
+    print("\n  Skipped grouped cross-validation: fewer than 2 countries.")
 
 # ── STEP 9: FEATURE IMPORTANCE ───────────────────────────────────────────────
 print("\n── STEP 9: FEATURE IMPORTANCE ──")
@@ -256,8 +273,7 @@ print(f"Rows with missing poverty data: {len(df_missing)}")
 
 if len(df_missing) > 0:
     X_missing = df_missing[FEATURES_WITH_YEAR].copy()
-    X_missing_imputed = imputer.transform(X_missing)
-    df_missing['predicted_poverty'] = model.predict(X_missing_imputed).round(2)
+    df_missing['predicted_poverty'] = pipeline.predict(X_missing).round(2)
 
     print("\nSample predictions for missing poverty values:")
     print(df_missing[['country','year','predicted_poverty']].head(15).to_string(index=False))
